@@ -1,0 +1,24 @@
+# Виртуальное окружение
+venv/
+.venv/
+env/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Логи и временные файлы
+*.log
+.processing_log.json
+
+# Папки с данными (если не нужно их заливать)
+archive/
+input/
+output/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Пароли
+.env
