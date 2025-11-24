@@ -7,26 +7,60 @@
 Отслеживает уже обработанные файлы
 
 Автор: Учебный проект Docling
-Версия: 1.0
+Версия: 1.1 (с исправлением backend для Windows)
 ====================================================================
 """
 
 import os
+from dotenv import load_dotenv
+# ==========================================
+# 🌍 НАСТРОЙКА ПРОКСИ ИЗ .ENV
+# ==========================================
+# Загружаем переменные из файла .env
+load_dotenv()
+
+# Получаем значение PROXY_URL
+proxy_url = os.getenv("PROXY_URL")
+
+if proxy_url:
+    print(f"⚙️  Найдена настройка прокси в .env")
+    # Применяем прокси
+    os.environ["HTTP_PROXY"] = proxy_url
+    os.environ["HTTPS_PROXY"] = proxy_url
+    print(f"   ✅ Прокси активирован")
+else:
+    print("ℹ️  Прокси не задан (файл .env или переменная PROXY_URL отсутствуют)")
+
+# ==========================================
+
 import json
 import time
 from pathlib import Path
 from datetime import datetime
-from docling.document_converter import DocumentConverter
+
+
+
+# Основные импорты Docling
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+# ВАЖНО: Импортируем альтернативный движок (backend), который не зависит от resources.dat
+from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 
 
 # ====================================================================
 # КОНФИГУРАЦИЯ
 # ====================================================================
 
-# Папки проекта
-INPUT_DIR = Path("input")           # Папка с исходными файлами
-OUTPUT_DIR = Path("output")         # Папка для результатов
-LOG_FILE = Path(".processing_log.json")  # База обработанных файлов
+# Папки проекта (поднимаемся на уровень выше из папки скрипта main_files)
+# Если converter.py лежит в корне проекта, используйте Path("input")
+# Если converter.py лежит в main_files/, используйте .parent.parent
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name == "main_files" else SCRIPT_DIR
+
+INPUT_DIR = PROJECT_ROOT / "input"           # Папка с исходными файлами
+OUTPUT_DIR = PROJECT_ROOT / "output"         # Папка для результатов
+LOG_FILE = PROJECT_ROOT / ".processing_log.json"  # База обработанных файлов
 
 # Поддерживаемые форматы
 SUPPORTED_FORMATS = ['.pdf', '.docx', '.pptx', '.doc', '.xlsx', '.html']
@@ -39,13 +73,15 @@ SUPPORTED_FORMATS = ['.pdf', '.docx', '.pptx', '.doc', '.xlsx', '.html']
 def load_processing_log():
     """
     Загружает информацию об уже обработанных файлах из JSON
-    
     Возвращает:
         dict: Словарь {имя_файла: {"modified": время, "output": путь}}
     """
     if LOG_FILE.exists():
-        with open(LOG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {}
     return {}
 
 
@@ -56,7 +92,6 @@ def load_processing_log():
 def save_processing_log(log_data):
     """
     Сохраняет информацию об обработанных файлах в JSON
-    
     Параметры:
         log_data (dict): Данные для сохранения
     """
@@ -71,12 +106,6 @@ def save_processing_log(log_data):
 def get_file_modified_time(file_path):
     """
     Получает время последней модификации файла
-    
-    Параметры:
-        file_path (Path): Путь к файлу
-        
-    Возвращает:
-        float: Timestamp времени модификации
     """
     return os.path.getmtime(file_path)
 
@@ -89,13 +118,6 @@ def should_process_file(file_path, log_data):
     """
     Проверяет, нужно ли обрабатывать файл
     (новый или изменённый с момента последней обработки)
-    
-    Параметры:
-        file_path (Path): Путь к файлу
-        log_data (dict): База обработанных файлов
-        
-    Возвращает:
-        bool: True если нужно обработать, False если уже обработан
     """
     file_name = file_path.name
     current_modified = get_file_modified_time(file_path)
@@ -120,11 +142,9 @@ def should_process_file(file_path, log_data):
 def convert_file(file_path, converter):
     """
     Конвертирует один файл в Markdown
-    
     Параметры:
         file_path (Path): Путь к исходному файлу
         converter: Объект DocumentConverter
-        
     Возвращает:
         tuple: (успех, путь_к_результату, время_обработки)
     """
@@ -160,9 +180,6 @@ def convert_file(file_path, converter):
 def get_files_to_process():
     """
     Сканирует папку input/ и возвращает список файлов для обработки
-    
-    Возвращает:
-        list: Список Path объектов файлов
     """
     files_to_process = []
     
@@ -194,7 +211,7 @@ def main():
     """
     print()
     print("=" * 70)
-    print("🚀 УМНЫЙ КОНВЕРТЕР ДОКУМЕНТОВ")
+    print("🚀 УМНЫЙ КОНВЕРТЕР ДОКУМЕНТОВ (PyPdfium Backend)")
     print("=" * 70)
     print(f"📂 Входная папка: {INPUT_DIR.absolute()}")
     print(f"📂 Выходная папка: {OUTPUT_DIR.absolute()}")
@@ -229,9 +246,28 @@ def main():
     print(f"🔄 Нужно обработать: {len(files_to_process)} файлов")
     print()
     
-    # Создаём конвертер один раз для всех файлов
+    # --- НАСТРОЙКА КОНВЕРТЕРА ---
     print("📦 Инициализация конвертера...")
-    converter = DocumentConverter()
+    
+    # 1. Настройки Pipeline (что и как искать в PDF)
+    pipeline_options = PdfPipelineOptions(
+        do_ocr=True,               # Включить OCR (для сканированных документов)
+        do_table_structure=True,   # Искать таблицы
+        table_structure_options={"mode": TableFormerMode.ACCURATE}  # Точный режим для таблиц
+    )
+
+    # 2. Настройка формата PDF с использованием PyPdfium2Backend
+    # Это решает проблему "filename does not exists: .../additional.dat" на Windows
+    format_options = {
+        InputFormat.PDF: PdfFormatOption(
+            pipeline_options=pipeline_options,
+            backend=PyPdfiumDocumentBackend 
+        )
+    }
+    
+    # 3. Создание объекта конвертера
+    converter = DocumentConverter(format_options=format_options)
+    
     print("   ✅ Готово!")
     print()
     
