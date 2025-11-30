@@ -218,8 +218,12 @@ def main():
     print()
     
     # Создаём папки если их нет
-    INPUT_DIR.mkdir(exist_ok=True)
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    try:
+        INPUT_DIR.mkdir(exist_ok=True)
+        OUTPUT_DIR.mkdir(exist_ok=True)
+    except OSError as e:
+        print(f"❌ Ошибка при создании папок: {e}")
+        return
     
     # Загружаем базу обработанных файлов
     log_data = load_processing_log()
